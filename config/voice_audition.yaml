@@ -1,0 +1,49 @@
+# Kokoro voice prefixes:
+# - af: American female
+# - am: American male
+# - bf: British female
+# - bm: British male
+#
+# English voices discovered from hexgrad/Kokoro-82M:
+# American female: af_alloy, af_aoede, af_bella, af_heart, af_jessica, af_kore,
+#   af_nicole, af_nova, af_river, af_sarah, af_sky
+# American male: am_adam, am_echo, am_eric, am_fenrir, am_liam, am_michael,
+#   am_onyx, am_puck, am_santa
+# British female: bf_alice, bf_emma, bf_isabella, bf_lily
+# British male: bm_daniel, bm_fable, bm_george, bm_lewis
+
+lang_code: a
+sample_rate: 24000
+
+note: "am_adam was only used as a temporary audition reference. Do not use am_adam for Host or Guest production voice."
+
+individual_sample_text: "Have you ever understood English perfectly, but then frozen when it was your turn to speak? That feeling is real, and practicing natural conversations helps you respond with more confidence."
+
+voices_to_test:
+  - af_heart
+  - af_bella
+  - af_nicole
+  - af_sarah
+  - af_nova
+  - am_echo
+  - am_liam
+  - am_michael
+  - am_adam
+  - bf_emma
+  - bm_george
+
+pair_tests:
+  - name: pair_test_01
+    host_voice: af_heart
+    guest_voice: am_echo
+  - name: pair_test_02
+    host_voice: af_bella
+    guest_voice: am_liam
+  - name: pair_test_03
+    host_voice: af_nicole
+    guest_voice: bm_george
+
+pause_seconds:
+  default: 0.5
+  after_question: 0.65
+  after_long_reply: 0.6

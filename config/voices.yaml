@@ -1,0 +1,10 @@
+lang_code: a
+sample_rate: 24000
+host_voice: af_heart
+guest_voice: am_echo
+output_format: wav
+note: "am_adam is forbidden for production podcast audio."
+pause_seconds:
+  default: 0.5
+  after_question: 0.65
+  after_long_reply: 0.6

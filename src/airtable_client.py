@@ -1,0 +1,105 @@
+from pathlib import Path
+import json
+import os
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote
+from urllib.request import Request, urlopen
+
+from dotenv import load_dotenv
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+ENV_PATH = PROJECT_ROOT / ".env"
+
+
+class AirtableConfigError(RuntimeError):
+    pass
+
+
+class AirtableRequestError(RuntimeError):
+    pass
+
+
+def load_airtable_env() -> dict[str, str]:
+    load_dotenv(ENV_PATH)
+    env_values = {
+        "AIRTABLE_API_KEY": os.getenv("AIRTABLE_API_KEY", "").strip(),
+        "AIRTABLE_BASE_ID": os.getenv("AIRTABLE_BASE_ID", "").strip(),
+        "AIRTABLE_TABLE_NAME": os.getenv("AIRTABLE_TABLE_NAME", "English Podcast Publishing Clean").strip(),
+    }
+    missing = [name for name, value in env_values.items() if not value]
+    if missing:
+        raise AirtableConfigError(
+            "Missing Airtable environment variable(s): "
+            + ", ".join(missing)
+            + ". Create a local .env file from .env.example."
+        )
+    return {
+        "api_key": env_values["AIRTABLE_API_KEY"],
+        "base_id": env_values["AIRTABLE_BASE_ID"],
+        "table_name": env_values["AIRTABLE_TABLE_NAME"],
+    }
+
+
+def airtable_formula_string(value: str) -> str:
+    return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
+class AirtableClient:
+    def __init__(self) -> None:
+        config = load_airtable_env()
+        self.api_key = config["api_key"]
+        self.base_id = config["base_id"]
+        self.table_name = config["table_name"]
+        self.base_url = f"https://api.airtable.com/v0/{quote(self.base_id)}/{quote(self.table_name, safe='')}"
+
+    def _request(self, method: str, url: str, payload: dict | None = None) -> dict:
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        data = json.dumps(payload).encode("utf-8") if payload is not None else None
+        request = Request(url, data=data, headers=headers, method=method)
+
+        try:
+            with urlopen(request, timeout=30) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            details = exc.read().decode("utf-8", errors="replace")
+            raise AirtableRequestError(f"Airtable HTTP {exc.code}: {details}") from exc
+        except URLError as exc:
+            raise AirtableRequestError(f"Airtable connection failed: {exc.reason}") from exc
+
+    def find_record_by_title(self, title: str) -> dict | None:
+        formula = f"{{Titre}} = {airtable_formula_string(title)}"
+        url = f"{self.base_url}?maxRecords=1&filterByFormula={quote(formula, safe='')}"
+        data = self._request("GET", url)
+        records = data.get("records", [])
+        return records[0] if records else None
+
+    def find_ready_record(self) -> dict | None:
+        formula = (
+            "AND("
+            "{Statut} = 'A publier',"
+            "{Script} != '',"
+            "{Lien Image} != '',"
+            "{Lien Thumbnail} != '',"
+            "{Lien Video} = ''"
+            ")"
+        )
+        query = (
+            f"?maxRecords=1"
+            f"&filterByFormula={quote(formula, safe='')}"
+            f"&sort%5B0%5D%5Bfield%5D={quote('Date Publication', safe='')}"
+            f"&sort%5B0%5D%5Bdirection%5D=asc"
+        )
+        data = self._request("GET", self.base_url + query)
+        records = data.get("records", [])
+        return records[0] if records else None
+
+    def create_record(self, fields: dict) -> dict:
+        return self._request("POST", self.base_url, {"fields": fields})
+
+    def update_record(self, record_id: str, fields: dict) -> dict:
+        url = f"{self.base_url}/{quote(record_id, safe='')}"
+        return self._request("PATCH", url, {"fields": fields})
