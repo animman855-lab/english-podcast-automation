@@ -1,8 +1,10 @@
 from datetime import datetime
 from pathlib import Path
 import json
+import os
 import shutil
 import sys
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
@@ -46,6 +48,28 @@ def publish_datetime_from_fields(fields: dict) -> str | None:
     return f"{publication_date}T{slot}:00"
 
 
+def workflow_config() -> dict:
+    return {
+        "slot": os.getenv("PODCAST_SLOT", "10:00").strip() or "10:00",
+        "timezone": os.getenv("PODCAST_TIMEZONE", "America/Toronto").strip() or "America/Toronto",
+        "valid_window_hours": float(os.getenv("PODCAST_VALID_WINDOW_HOURS", "2")),
+    }
+
+
+def is_slot_window_open(now: datetime, slot: str, valid_window_hours: float) -> bool:
+    hour, minute = [int(part) for part in slot.split(":", 1)]
+    slot_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    elapsed_seconds = (now - slot_time).total_seconds()
+    return 0 <= elapsed_seconds <= valid_window_hours * 3600
+
+
+def record_date_is_due(fields: dict, now: datetime) -> bool:
+    publication_date = fields.get("Date Publication", "")
+    if not publication_date:
+        return False
+    return publication_date <= now.date().isoformat()
+
+
 def validate_record_fields(fields: dict) -> None:
     missing = [field for field in REQUIRED_FIELDS if not fields.get(field)]
     if missing:
@@ -60,7 +84,7 @@ def write_script(script: str, path: Path) -> Path:
 
 def main() -> int:
     load_dotenv(ENV_PATH)
-    dry_run = env_bool("DRY_RUN", default=True)
+    dry_run = env_bool("FORCE_DRY_RUN", default=env_bool("DRY_RUN", default=True))
     client: AirtableClient | None = None
     record_id = ""
     workflow_dir: Path | None = None
@@ -68,11 +92,26 @@ def main() -> int:
     try:
         require_ffmpeg()
         client = AirtableClient()
+        config = workflow_config()
+        now = datetime.now(ZoneInfo(config["timezone"]))
 
-        record = client.find_ready_record()
+        if not is_slot_window_open(now, config["slot"], config["valid_window_hours"]):
+            print("No eligible row found")
+            print(
+                f"Current {config['timezone']} time is {now.strftime('%Y-%m-%d %H:%M:%S')}; "
+                f"valid window is {config['slot']} plus {config['valid_window_hours']:.1f} hours."
+            )
+            print(f"DRY_RUN={str(dry_run).lower()}. Nothing was published.")
+            return 0
+
+        candidates = client.find_publish_candidates(config["slot"])
+        record = next((candidate for candidate in candidates if record_date_is_due(candidate.get("fields", {}), now)), None)
         if not record:
-            print("No ready Airtable record found.")
-            print("Expected: Statut=A publier, Script/Lien Image/Lien Thumbnail non-empty, Lien Video empty.")
+            print("No eligible row found")
+            print(
+                "Expected: Statut=A publier, Date Publication<=now, "
+                f"Slot={config['slot']}, Script/Lien Image/Lien Thumbnail non-empty, Lien Video empty."
+            )
             print(f"DRY_RUN={str(dry_run).lower()}. Nothing was published.")
             return 0
 

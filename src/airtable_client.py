@@ -97,6 +97,26 @@ class AirtableClient:
         records = data.get("records", [])
         return records[0] if records else None
 
+    def find_publish_candidates(self, slot: str, max_records: int = 10) -> list[dict]:
+        formula = (
+            "AND("
+            "{Statut} = 'A publier',"
+            f"{{Slot}} = {airtable_formula_string(slot)},"
+            "{Script} != '',"
+            "{Lien Image} != '',"
+            "{Lien Thumbnail} != '',"
+            "{Lien Video} = ''"
+            ")"
+        )
+        query = (
+            f"?maxRecords={max_records}"
+            f"&filterByFormula={quote(formula, safe='')}"
+            f"&sort%5B0%5D%5Bfield%5D={quote('Date Publication', safe='')}"
+            f"&sort%5B0%5D%5Bdirection%5D=asc"
+        )
+        data = self._request("GET", self.base_url + query)
+        return data.get("records", [])
+
     def create_record(self, fields: dict) -> dict:
         return self._request("POST", self.base_url, {"fields": fields})
 
