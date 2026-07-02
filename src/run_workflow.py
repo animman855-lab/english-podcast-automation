@@ -162,6 +162,7 @@ def main() -> int:
         package = build_uploadpost_package(
             video_path=video_path,
             thumbnail_path=assets["thumbnail_path"],
+            thumbnail_url=fields["Lien Thumbnail"],
             title=title,
             description=description,
             publish_datetime=publish_datetime_from_fields(fields),

@@ -1,6 +1,7 @@
 from pathlib import Path
 import json
 import os
+from urllib.parse import urlparse
 
 import requests
 
@@ -22,16 +23,20 @@ def env_bool(name: str, default: bool = True) -> bool:
 def build_uploadpost_package(
     video_path: str | Path,
     thumbnail_path: str | Path,
+    thumbnail_url: str,
     title: str,
     description: str,
     publish_datetime: str | None,
     output_path: str | Path,
 ) -> dict:
+    validate_thumbnail_url(thumbnail_url)
     package = {
         "platforms": ["youtube", "facebook"],
         "user": "thefluentbuild",
         "video_path": str(Path(video_path).resolve()),
         "thumbnail_path": str(Path(thumbnail_path).resolve()),
+        "thumbnail_url": thumbnail_url,
+        "thumbnail_sent_to_uploadpost": True,
         "title": title,
         "description": description,
         "publish_datetime": publish_datetime,
@@ -43,6 +48,27 @@ def build_uploadpost_package(
     return package
 
 
+def validate_thumbnail_url(thumbnail_url: str) -> None:
+    parsed = urlparse((thumbnail_url or "").strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise UploadPostBridgeError("Lien Thumbnail is missing or invalid. Expected a public http:// or https:// URL.")
+
+
+def build_uploadpost_data(package: dict) -> list[tuple[str, str]]:
+    thumbnail_url = package.get("thumbnail_url", "")
+    validate_thumbnail_url(thumbnail_url)
+    data = [
+        ("user", package.get("user", "thefluentbuild")),
+        ("title", package["title"]),
+        ("description", package["description"]),
+        ("thumbnail_url", thumbnail_url),
+        ("facebook_media_type", "VIDEO"),
+    ]
+    for platform in package.get("platforms", ["youtube", "facebook"]):
+        data.append(("platform[]", platform))
+    return data
+
+
 def upload_to_upload_post(package: dict) -> dict:
     api_key = os.getenv("UPLOAD_POST_API_KEY", "").strip()
     if not api_key:
@@ -52,15 +78,9 @@ def upload_to_upload_post(package: dict) -> dict:
     if not video_path.exists():
         raise UploadPostBridgeError(f"Video file does not exist: {video_path}")
 
-    data = [
-        ("user", package.get("user", "thefluentbuild")),
-        ("title", package["title"]),
-        ("description", package["description"]),
-    ]
-    for platform in package.get("platforms", ["youtube", "facebook"]):
-        data.append(("platform[]", platform))
+    data = build_uploadpost_data(package)
 
-    print("Custom thumbnail is downloaded and kept in the package, but no reliable Upload-Post video thumbnail field was confirmed. It will not be sent.")
+    print(f"Using thumbnail_url: {package['thumbnail_url']}")
     with video_path.open("rb") as video_file:
         response = requests.post(
             "https://api.upload-post.com/api/upload",
@@ -107,6 +127,8 @@ def submit_or_dry_run(package: dict, dry_run: bool) -> dict:
         print("DRY_RUN=true. Nothing will be sent to Upload-Post.")
         print("Upload-Post package that would be sent:")
         print(json.dumps(package, indent=2))
+        print("Upload-Post form fields that would be sent:")
+        print(json.dumps(build_uploadpost_data(package), indent=2))
         return {"published": False, "youtube_url": "", "dry_run": True}
 
     response = upload_to_upload_post(package)
