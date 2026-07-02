@@ -52,7 +52,7 @@ def workflow_config() -> dict:
     return {
         "slot": os.getenv("PODCAST_SLOT", "10:00").strip() or "10:00",
         "timezone": os.getenv("PODCAST_TIMEZONE", "America/Toronto").strip() or "America/Toronto",
-        "valid_window_hours": float(os.getenv("PODCAST_VALID_WINDOW_HOURS", "2")),
+        "valid_window_hours": float(os.getenv("PODCAST_VALID_WINDOW_HOURS", "3")),
     }
 
 
