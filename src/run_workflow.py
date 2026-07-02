@@ -13,7 +13,13 @@ from description_builder import build_youtube_description
 from download_assets import AssetDownloadError, download_episode_assets
 from main import generate_audio_from_script
 from subtitle_ass import generate_ass
-from uploadpost_bridge import UploadPostBridgeError, build_uploadpost_package, env_bool, submit_or_dry_run
+from uploadpost_bridge import (
+    UploadPostBridgeError,
+    build_uploadpost_package,
+    env_bool,
+    optimize_thumbnail_for_uploadpost,
+    submit_or_dry_run,
+)
 from video_renderer import probe_duration, render_video, require_ffmpeg
 
 
@@ -183,6 +189,15 @@ def main() -> int:
         assets = download_episode_assets(fields["Lien Image"], fields["Lien Thumbnail"], assets_dir)
         print(f"Main image downloaded: {assets['image_path']}")
         print(f"Thumbnail downloaded: {assets['thumbnail_path']}")
+        thumbnail_optimized_path = assets_dir / "thumbnail_optimized.jpg"
+        try:
+            thumbnail_result = optimize_thumbnail_for_uploadpost(assets["thumbnail_path"], thumbnail_optimized_path)
+            print(f"Original thumbnail size: {thumbnail_result['original_size_bytes']} bytes")
+            print(f"Optimized thumbnail size: {thumbnail_result['optimized_size_bytes']} bytes")
+            print(f"Optimized thumbnail: {thumbnail_result['optimized_path']}")
+        except UploadPostBridgeError as exc:
+            thumbnail_optimized_path = None
+            print(f"WARNING: Thumbnail optimization failed; falling back to thumbnail_url. Error: {exc}")
 
         write_script(fields["Script"], script_path)
         audio_result = generate_audio_from_script(
@@ -204,6 +219,7 @@ def main() -> int:
         package = build_uploadpost_package(
             video_path=video_path,
             thumbnail_path=assets["thumbnail_path"],
+            thumbnail_optimized_path=thumbnail_optimized_path,
             thumbnail_url=fields["Lien Thumbnail"],
             title=title,
             description=description,
@@ -235,6 +251,7 @@ def main() -> int:
                 "dry_run": dry_run,
                 "video_path": str(video_path),
                 "thumbnail_path": str(assets["thumbnail_path"]),
+                "thumbnail_optimized_path": str(thumbnail_optimized_path),
                 "package_path": str(package_path),
                 "published": bool(upload_result.get("published")),
                 "youtube_url": upload_result.get("youtube_url", ""),
