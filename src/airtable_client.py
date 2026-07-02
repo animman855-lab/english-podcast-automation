@@ -1,6 +1,7 @@
 from pathlib import Path
 import json
 import os
+import re
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -43,6 +44,35 @@ def load_airtable_env() -> dict[str, str]:
 
 def airtable_formula_string(value: str) -> str:
     return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
+def normalize_slot(value: object) -> str | None:
+    raw_value = str(value or "").strip().lower()
+    if not raw_value:
+        return None
+
+    raw_value = raw_value.replace("h", ":00")
+    match = re.fullmatch(r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", raw_value)
+    if not match:
+        return None
+
+    hour = int(match.group(1))
+    minute = int(match.group(2) or "0")
+    meridiem = match.group(3)
+
+    if minute > 59:
+        return None
+    if meridiem:
+        if not 1 <= hour <= 12:
+            return None
+        if meridiem == "am" and hour == 12:
+            hour = 0
+        elif meridiem == "pm" and hour != 12:
+            hour += 12
+    elif hour > 23:
+        return None
+
+    return f"{hour:02d}:{minute:02d}"
 
 
 class AirtableClient:
@@ -97,11 +127,10 @@ class AirtableClient:
         records = data.get("records", [])
         return records[0] if records else None
 
-    def find_publish_candidates(self, slot: str, max_records: int = 10) -> list[dict]:
+    def find_publish_candidates(self, max_records: int = 10) -> list[dict]:
         formula = (
             "AND("
             "{Statut} = 'A publier',"
-            f"{{Slot}} = {airtable_formula_string(slot)},"
             "{Script} != '',"
             "{Lien Image} != '',"
             "{Lien Thumbnail} != '',"

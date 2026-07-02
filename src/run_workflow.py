@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
-from airtable_client import AirtableClient, AirtableConfigError, AirtableRequestError
+from airtable_client import AirtableClient, AirtableConfigError, AirtableRequestError, normalize_slot
 from description_builder import build_youtube_description
 from download_assets import AssetDownloadError, download_episode_assets
 from main import generate_audio_from_script
@@ -38,9 +38,30 @@ def safe_slug(value: str) -> str:
     return "".join(character.lower() if character.isalnum() else "_" for character in value).strip("_")[:80]
 
 
+def explain_candidate_rejection(fields: dict, expected_slot: str, now: datetime) -> str | None:
+    raw_slot = fields.get("Slot", "")
+    normalized_slot = normalize_slot(raw_slot)
+    if not normalized_slot:
+        return (
+            f"Slot Airtable brut={raw_slot!r}; Slot Airtable normalise=invalid; "
+            f"Slot attendu normalise={expected_slot}; raison=slot vide ou impossible a parser"
+        )
+    if normalized_slot != expected_slot:
+        return (
+            f"Slot Airtable brut={raw_slot!r}; Slot Airtable normalise={normalized_slot}; "
+            f"Slot attendu normalise={expected_slot}; raison=slot different"
+        )
+    if not record_date_is_due(fields, now):
+        return (
+            f"Slot Airtable brut={raw_slot!r}; Slot Airtable normalise={normalized_slot}; "
+            f"Slot attendu normalise={expected_slot}; raison=Date Publication pas encore due"
+        )
+    return None
+
+
 def publish_datetime_from_fields(fields: dict) -> str | None:
     publication_date = fields.get("Date Publication", "")
-    slot = fields.get("Slot", "")
+    slot = normalize_slot(fields.get("Slot", ""))
     if not publication_date:
         return None
     if not slot:
@@ -57,7 +78,10 @@ def workflow_config() -> dict:
 
 
 def is_slot_window_open(now: datetime, slot: str, valid_window_hours: float) -> bool:
-    hour, minute = [int(part) for part in slot.split(":", 1)]
+    normalized_slot = normalize_slot(slot)
+    if not normalized_slot:
+        raise RuntimeError(f"Invalid PODCAST_SLOT value: {slot}")
+    hour, minute = [int(part) for part in normalized_slot.split(":", 1)]
     slot_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
     elapsed_seconds = (now - slot_time).total_seconds()
     return 0 <= elapsed_seconds <= valid_window_hours * 3600
@@ -94,6 +118,9 @@ def main() -> int:
         client = AirtableClient()
         config = workflow_config()
         now = datetime.now(ZoneInfo(config["timezone"]))
+        expected_slot = normalize_slot(config["slot"])
+        if not expected_slot:
+            raise RuntimeError(f"Invalid PODCAST_SLOT value: {config['slot']}")
 
         if not is_slot_window_open(now, config["slot"], config["valid_window_hours"]):
             print("No eligible row found")
@@ -104,14 +131,29 @@ def main() -> int:
             print(f"DRY_RUN={str(dry_run).lower()}. Nothing was published.")
             return 0
 
-        candidates = client.find_publish_candidates(config["slot"])
-        record = next((candidate for candidate in candidates if record_date_is_due(candidate.get("fields", {}), now)), None)
+        candidates = client.find_publish_candidates()
+        rejection_reasons = []
+        record = None
+        for candidate in candidates:
+            fields = candidate.get("fields", {})
+            rejection_reason = explain_candidate_rejection(fields, expected_slot, now)
+            if rejection_reason:
+                rejection_reasons.append(rejection_reason)
+                continue
+            record = candidate
+            break
+
         if not record:
             print("No eligible row found")
             print(
                 "Expected: Statut=A publier, Date Publication<=now, "
-                f"Slot={config['slot']}, Script/Lien Image/Lien Thumbnail non-empty, Lien Video empty."
+                f"Slot={config['slot']} (normalized {expected_slot}), "
+                "Script/Lien Image/Lien Thumbnail non-empty, Lien Video empty."
             )
+            if rejection_reasons:
+                print("Rejected ready Airtable rows:")
+                for reason in rejection_reasons:
+                    print(f"- {reason}")
             print(f"DRY_RUN={str(dry_run).lower()}. Nothing was published.")
             return 0
 
