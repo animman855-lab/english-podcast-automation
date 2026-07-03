@@ -2,6 +2,7 @@ from datetime import date, timedelta
 import sys
 
 from airtable_client import AirtableClient, AirtableConfigError, AirtableRequestError
+from prompt_builder import build_podcast_visual_prompts
 
 
 TITLE = "You Understand English But Can't Speak"
@@ -44,60 +45,9 @@ Host: If you want more natural English conversations like this, follow Saloo Eng
 Guest: See you in the next conversation."""
 
 
-SHARED_CHARACTER_ANCHOR = {
-    "female_host_facial_identity": "friendly oval face, soft cheek shape, bright expressive brown eyes, gentle confident smile",
-    "female_host_skin_tone": "warm medium skin tone",
-    "female_host_hair": "dark brown shoulder-length wavy hair, side part, polished stylized cartoon hair",
-    "male_guest_facial_identity": "kind rounded face, expressive dark eyes, slightly nervous but warm smile, soft jawline",
-    "male_guest_skin_tone": "light warm skin tone",
-    "male_guest_hair": "short black slightly wavy hair, neat modern cartoon style",
-    "overall_cartoon_podcast_style": "high-quality 3D cartoon illustration, stylized animated characters, premium YouTube podcast look, beautiful warm lighting, expressive faces, clean polished rendering, visually attractive and reassuring, suitable for an English conversation podcast, not photorealistic, not live action, not realistic humans",
-}
-
-
-NEGATIVE_VISUAL_STYLE = (
-    "Negative style requirements: no photorealistic humans, no realistic human skin texture, "
-    "no live-action look, no real-photo style, no ultra-realistic portrait, no boring flat design, no cheap look."
-)
-
-
-def shared_character_anchor_text(anchor: dict) -> str:
-    return (
-        "Use the same character identity in this image and the matching thumbnail. "
-        f"Female host: {anchor['female_host_facial_identity']}; "
-        f"skin tone: {anchor['female_host_skin_tone']}; "
-        f"hair: {anchor['female_host_hair']}. "
-        f"Male guest: {anchor['male_guest_facial_identity']}; "
-        f"skin tone: {anchor['male_guest_skin_tone']}; "
-        f"hair: {anchor['male_guest_hair']}. "
-        f"Overall visual style: {anchor['overall_cartoon_podcast_style']}."
-    )
-
-
-def build_prompt_image(anchor: dict = SHARED_CHARACTER_ANCHOR) -> str:
-    return (
-        "Create a 16:9 main YouTube English conversation podcast image. "
-        + shared_character_anchor_text(anchor)
-        + ' Show the two people as animated 3D cartoon characters in a warm podcast studio, with visible microphones, a clear podcast setup, cozy beige/orange/blue colors, and a beautiful cinematic cartoon composition. '
-        + 'Add large readable text in the image: "YOU UNDERSTAND" and "BUT CAN\'T SPEAK?" '
-        + "Make it visually beautiful, clean, modern, reassuring, premium, and not crowded. Saloo branding should not be the main visual element. "
-        + NEGATIVE_VISUAL_STYLE
-    )
-
-
-def build_prompt_thumbnail(anchor: dict = SHARED_CHARACTER_ANCHOR) -> str:
-    return (
-        "Create a clickable 16:9 YouTube thumbnail for the same episode. "
-        + shared_character_anchor_text(anchor)
-        + " The thumbnail must keep the same two characters identifiable with the same face, skin tone, and hair as the main image, while allowing a different outfit, pose, framing, decor, and stronger emotional contrast. "
-        + 'Show a visible podcast setup with clear microphones. Make the female host supportive and reassuring, and the male guest frozen or nervous but friendly. Use strong contrast, warm beautiful lighting, polished premium 3D cartoon rendering, and a modern YouTube English conversation podcast style. Add big readable text with 3 to 6 words max: "CAN\'T SPEAK?" '
-        + "Make it beautiful, emotional, clean, clickworthy, and not cluttered. "
-        + NEGATIVE_VISUAL_STYLE
-    )
-
-
-PROMPT_IMAGE = build_prompt_image()
-PROMPT_THUMBNAIL = build_prompt_thumbnail()
+VISUAL_PROMPTS = build_podcast_visual_prompts(TITLE, "Speaking Problem", SCRIPT)
+PROMPT_IMAGE = VISUAL_PROMPTS["prompt_image"]
+PROMPT_THUMBNAIL = VISUAL_PROMPTS["prompt_thumbnail"]
 
 
 def build_first_episode_fields() -> dict:
