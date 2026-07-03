@@ -152,6 +152,15 @@ def warn_thumbnail_result(response: dict) -> None:
             print(f"WARNING: Upload-Post {platform} thumbnail was not applied: {error}")
 
 
+def is_background_accepted(response: dict) -> bool:
+    message = str(response.get("message", "")).lower()
+    return bool(response.get("request_id")) and (
+        "background" in message
+        or "upload initiated" in message
+        or "handed off" in message
+    )
+
+
 def upload_to_upload_post(package: dict) -> dict:
     api_key = os.getenv("UPLOAD_POST_API_KEY", "").strip()
     if not api_key:
@@ -170,6 +179,7 @@ def upload_to_upload_post(package: dict) -> dict:
     else:
         print(f"WARNING: Falling back to thumbnail_url: {package['thumbnail_url']}")
     print(f"thumbnail upload mode: {thumbnail_mode}")
+    print(f"Upload-Post multipart file fields: {', '.join(file_specs.keys())}")
 
     with ExitStack() as stack:
         files = {}
@@ -195,6 +205,12 @@ def upload_to_upload_post(package: dict) -> dict:
 
     if result.get("success") is False or result.get("status") == "failed":
         raise UploadPostBridgeError(f"Upload-Post reported failure: {result}")
+
+    if is_background_accepted(result):
+        print(f"Upload-Post accepted publication in background. request_id={result.get('request_id')}")
+        print("Upload-Post final platform URLs are not available in the immediate response.")
+        print("Thumbnail final status is not available yet because the upload is still processing in background.")
+        return result
 
     for platform in package.get("platforms", []):
         platform_result = result.get("results", {}).get(platform)
@@ -229,4 +245,12 @@ def submit_or_dry_run(package: dict, dry_run: bool) -> dict:
 
     response = upload_to_upload_post(package)
     youtube_url = extract_youtube_url(response)
-    return {"published": True, "youtube_url": youtube_url, "dry_run": False, "response": response}
+    background_accepted = is_background_accepted(response)
+    return {
+        "published": True,
+        "youtube_url": youtube_url,
+        "dry_run": False,
+        "background_accepted": background_accepted,
+        "request_id": response.get("request_id", ""),
+        "response": response,
+    }

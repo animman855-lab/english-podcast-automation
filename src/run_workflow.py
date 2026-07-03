@@ -232,10 +232,17 @@ def main() -> int:
 
         if upload_result.get("published"):
             youtube_url = upload_result.get("youtube_url", "")
-            if not youtube_url:
+            if youtube_url:
+                client.update_record(record_id, {"Lien Video": youtube_url, "Statut": "Publie"})
+                print(f"Airtable updated with YouTube URL: {youtube_url}")
+            elif upload_result.get("background_accepted"):
+                request_id = upload_result.get("request_id", "")
+                client.update_record(record_id, {"Statut": "Publie"})
+                print("Upload-Post accepted publication in background.")
+                print(f"Upload-Post request_id: {request_id}")
+                print("Airtable Statut set to Publie. Lien Video left empty because no URL was returned yet.")
+            else:
                 raise RuntimeError("Upload-Post published but did not return a YouTube URL.")
-            client.update_record(record_id, {"Lien Video": youtube_url, "Statut": "Publie"})
-            print(f"Airtable updated with YouTube URL: {youtube_url}")
             if workflow_dir:
                 shutil.rmtree(workflow_dir, ignore_errors=True)
                 print("Temporary workflow files deleted after publication.")
