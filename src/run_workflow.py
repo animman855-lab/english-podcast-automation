@@ -232,7 +232,13 @@ def main() -> int:
 
         if upload_result.get("published"):
             youtube_url = upload_result.get("youtube_url", "")
-            if youtube_url:
+            if upload_result.get("thumbnail_failed"):
+                request_id = upload_result.get("request_id", "")
+                print("WARNING: Video was published, but Upload-Post reported a thumbnail failure.")
+                print(f"Upload-Post request_id: {request_id}")
+                print(f"Thumbnail error(s): {upload_result.get('thumbnail_errors', [])}")
+                print("Airtable left as En cours so the issue can be reviewed without creating a duplicate.")
+            elif youtube_url:
                 client.update_record(record_id, {"Lien Video": youtube_url, "Statut": "Publie"})
                 print(f"Airtable updated with YouTube URL: {youtube_url}")
             elif upload_result.get("background_accepted"):
@@ -246,6 +252,11 @@ def main() -> int:
             if workflow_dir:
                 shutil.rmtree(workflow_dir, ignore_errors=True)
                 print("Temporary workflow files deleted after publication.")
+        elif upload_result.get("upload_accepted") and upload_result.get("still_processing"):
+            request_id = upload_result.get("request_id", "")
+            print("Upload-Post accepted publication, but final status was not available before timeout.")
+            print(f"Upload-Post request_id: {request_id}")
+            print("Airtable left as En cours to avoid duplicate publication while processing continues.")
         else:
             print("Dry-run complete. Airtable was not marked Publie and no Lien Video was written.")
 

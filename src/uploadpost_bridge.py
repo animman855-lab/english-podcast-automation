@@ -2,6 +2,7 @@ from pathlib import Path
 from contextlib import ExitStack
 import json
 import os
+import time
 from urllib.parse import urlparse
 
 from PIL import Image
@@ -16,6 +17,8 @@ class UploadPostBridgeError(RuntimeError):
 
 
 THUMBNAIL_MAX_BYTES = 1_800_000
+UPLOAD_STATUS_POLL_INTERVAL_SECONDS = 30
+UPLOAD_STATUS_TIMEOUT_SECONDS = 600
 
 
 def env_bool(name: str, default: bool = True) -> bool:
@@ -144,21 +147,135 @@ def build_uploadpost_file_specs(package: dict) -> dict[str, tuple[str, Path, str
 
 
 def warn_thumbnail_result(response: dict) -> None:
-    for platform, platform_result in response.get("results", {}).items():
-        if not isinstance(platform_result, dict):
-            continue
+    for platform_result in platform_results(response):
         if platform_result.get("thumbnail_set") is False:
+            platform = platform_result.get("platform", "unknown")
             error = platform_result.get("thumbnail_error") or "Upload-Post did not apply the thumbnail."
             print(f"WARNING: Upload-Post {platform} thumbnail was not applied: {error}")
 
 
+def response_payload(response: dict) -> dict:
+    payload = response.get("result")
+    return payload if isinstance(payload, dict) else response
+
+
+def platform_results(response: dict) -> list[dict]:
+    payload = response_payload(response)
+    results = payload.get("results", {})
+    if isinstance(results, dict):
+        return [dict(value, platform=platform) for platform, value in results.items() if isinstance(value, dict)]
+    if isinstance(results, list):
+        return [result for result in results if isinstance(result, dict)]
+    return []
+
+
+def platform_result_for(response: dict, platform: str) -> dict | None:
+    for result in platform_results(response):
+        if result.get("platform") == platform:
+            return result
+    return None
+
+
 def is_background_accepted(response: dict) -> bool:
-    message = str(response.get("message", "")).lower()
-    return bool(response.get("request_id")) and (
-        "background" in message
-        or "upload initiated" in message
-        or "handed off" in message
+    payload = response_payload(response)
+    message = str(payload.get("message", "")).lower()
+    return bool(payload.get("background_accepted")) or (
+        bool(payload.get("request_id"))
+        and (
+            "background" in message
+            or "upload initiated" in message
+            or "handed off" in message
+        )
     )
+
+
+def is_final_status(response: dict) -> bool:
+    payload = response_payload(response)
+    status = str(payload.get("status", "")).lower()
+    if status in {"completed", "success", "failed"}:
+        return True
+    total = payload.get("total")
+    completed = payload.get("completed")
+    if isinstance(total, int) and isinstance(completed, int) and total > 0 and completed >= total:
+        return True
+    return bool(platform_results(response)) and status not in {"queued", "processing", "pending", "running"}
+
+
+def get_upload_status(request_id: str, api_key: str) -> dict:
+    response = requests.get(
+        "https://api.upload-post.com/api/uploadposts/status",
+        headers={"Authorization": f"Apikey {api_key}"},
+        params={"request_id": request_id},
+        timeout=60,
+    )
+    print(f"Upload-Post status check HTTP status: {response.status_code}")
+    print(f"Upload-Post status response preview: {response.text[:500]}")
+    if response.status_code >= 400:
+        raise UploadPostBridgeError(f"Upload-Post status HTTP {response.status_code}: {response.text[:1000]}")
+    try:
+        return response.json()
+    except json.JSONDecodeError as exc:
+        raise UploadPostBridgeError("Upload-Post status returned invalid JSON.") from exc
+
+
+def poll_upload_status(
+    request_id: str,
+    api_key: str,
+    interval_seconds: int = UPLOAD_STATUS_POLL_INTERVAL_SECONDS,
+    timeout_seconds: int = UPLOAD_STATUS_TIMEOUT_SECONDS,
+    sleep_fn=time.sleep,
+) -> dict | None:
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        status_response = get_upload_status(request_id, api_key)
+        if is_final_status(status_response):
+            print(f"Upload-Post final status received for request_id={request_id}")
+            return status_response
+        if time.monotonic() >= deadline:
+            print(f"WARNING: Upload-Post still processing after {timeout_seconds}s. request_id={request_id}")
+            return None
+        print(f"Upload-Post still processing. Waiting {interval_seconds}s before next status check.")
+        sleep_fn(interval_seconds)
+
+
+def upload_response_summary(response: dict, expected_platforms: list[str]) -> dict:
+    payload = response_payload(response)
+    results = platform_results(response)
+    failures = []
+    successes = []
+    thumbnail_errors = []
+    thumbnail_confirmed = False
+
+    for result in results:
+        platform = result.get("platform", "unknown")
+        if result.get("success") is False:
+            failures.append(f"{platform}: {result.get('error') or result.get('error_message') or result}")
+        else:
+            successes.append(platform)
+
+        if result.get("thumbnail_set") is True:
+            thumbnail_confirmed = True
+        if result.get("thumbnail_set") is False or result.get("thumbnail_error"):
+            thumbnail_errors.append(f"{platform}: {result.get('thumbnail_error') or 'thumbnail_set=false'}")
+
+    status = str(payload.get("status", "")).lower()
+    if status in {"failed", "error"} and not failures:
+        failures.append(payload.get("error") or payload.get("message") or f"Upload-Post status={status}")
+
+    failed_platforms = [failure.split(":", 1)[0] for failure in failures]
+    missing_platforms = [
+        platform for platform in expected_platforms if platform not in successes and platform not in failed_platforms
+    ]
+    if results and missing_platforms:
+        failures.append(f"Missing final result for platform(s): {', '.join(missing_platforms)}")
+    return {
+        "platform_successes": successes,
+        "platform_failures": failures,
+        "missing_platforms": missing_platforms,
+        "thumbnail_confirmed": thumbnail_confirmed,
+        "thumbnail_failed": bool(thumbnail_errors),
+        "thumbnail_errors": thumbnail_errors,
+    }
 
 
 def upload_to_upload_post(package: dict) -> dict:
@@ -207,13 +324,21 @@ def upload_to_upload_post(package: dict) -> dict:
         raise UploadPostBridgeError(f"Upload-Post reported failure: {result}")
 
     if is_background_accepted(result):
-        print(f"Upload-Post accepted publication in background. request_id={result.get('request_id')}")
+        request_id = response_payload(result).get("request_id", "")
+        print(f"Upload-Post accepted publication in background. request_id={request_id}")
         print("Upload-Post final platform URLs are not available in the immediate response.")
         print("Thumbnail final status is not available yet because the upload is still processing in background.")
+        final_status = poll_upload_status(request_id=request_id, api_key=api_key)
+        if final_status:
+            final_payload = response_payload(final_status)
+            final_payload.setdefault("request_id", request_id)
+            final_payload["background_accepted"] = True
+            return final_status
+        result["background_timeout"] = True
         return result
 
     for platform in package.get("platforms", []):
-        platform_result = result.get("results", {}).get(platform)
+        platform_result = platform_result_for(result, platform)
         if isinstance(platform_result, dict) and platform_result.get("success") is False:
             raise UploadPostBridgeError(f"Upload-Post {platform} failed: {platform_result}")
 
@@ -222,13 +347,19 @@ def upload_to_upload_post(package: dict) -> dict:
 
 
 def extract_youtube_url(response: dict) -> str:
-    direct = response.get("youtube_url") or response.get("url") or response.get("link")
+    payload = response_payload(response)
+    direct = payload.get("youtube_url") or payload.get("url") or payload.get("link")
     if direct:
         return direct
 
-    youtube_result = response.get("results", {}).get("youtube")
-    if isinstance(youtube_result, dict):
-        return youtube_result.get("url") or youtube_result.get("link") or youtube_result.get("post_url") or ""
+    results = payload.get("results", {})
+    if isinstance(results, dict):
+        youtube_result = results.get("youtube")
+        if isinstance(youtube_result, dict):
+            return youtube_result.get("url") or youtube_result.get("link") or youtube_result.get("post_url") or ""
+    for result in platform_results(response):
+        if result.get("platform") == "youtube":
+            return result.get("url") or result.get("link") or result.get("post_url") or ""
     return ""
 
 
@@ -245,12 +376,25 @@ def submit_or_dry_run(package: dict, dry_run: bool) -> dict:
 
     response = upload_to_upload_post(package)
     youtube_url = extract_youtube_url(response)
+    payload = response_payload(response)
     background_accepted = is_background_accepted(response)
+    still_processing = bool(payload.get("background_timeout"))
+    summary = upload_response_summary(response, package.get("platforms", []))
+
+    if summary["platform_failures"]:
+        raise UploadPostBridgeError(f"Upload-Post platform failure(s): {summary['platform_failures']}")
+
     return {
-        "published": True,
+        "published": bool(summary["platform_successes"]) and not still_processing,
+        "upload_accepted": True,
         "youtube_url": youtube_url,
         "dry_run": False,
         "background_accepted": background_accepted,
-        "request_id": response.get("request_id", ""),
+        "still_processing": still_processing,
+        "request_id": payload.get("request_id", ""),
+        "thumbnail_confirmed": summary["thumbnail_confirmed"],
+        "thumbnail_failed": summary["thumbnail_failed"],
+        "thumbnail_errors": summary["thumbnail_errors"],
+        "platform_successes": summary["platform_successes"],
         "response": response,
     }
