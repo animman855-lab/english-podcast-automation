@@ -1,24 +1,25 @@
 DEFAULT_CHARACTER_ANCHOR = {
     "female_host": (
-        "recognizable animated 3D cartoon woman host in her early 30s, warm medium skin tone, "
-        "distinct oval face, expressive brown eyes, defined brows, shoulder-length wavy dark brown hair, "
-        "confident supportive smile, memorable friendly presence"
+        "recognizable friendly cartoon woman host in her early 30s, fair warm skin tone, "
+        "distinct oval face, expressive green eyes, soft freckles, long wavy copper red hair, "
+        "bright supportive smile, yellow sweater, memorable reassuring presence"
     ),
     "male_guest": (
-        "recognizable animated 3D cartoon man guest in his early 30s, light olive skin tone, "
-        "rounded thoughtful face, expressive hazel eyes, short textured black hair, relaxed but curious smile, "
-        "memorable approachable presence"
+        "recognizable friendly cartoon man guest in his early 30s, light skin tone, "
+        "rounded thoughtful face, expressive blue eyes, short neat blond hair, relaxed curious smile, "
+        "blue shirt, memorable approachable presence"
     ),
     "style": (
-        "premium high-quality 3D cartoon illustration, polished cinematic rendering, warm beautiful lighting, "
-        "modern YouTube English conversation podcast look, stylized animated characters, not photorealistic, "
-        "not live action, no realistic human skin texture"
+        "clean premium YouTube educational podcast illustration inspired by successful English learning thumbnails, "
+        "warm cream background, friendly colorful cartoon look, soft shadows, crisp outlines, large readable layout, "
+        "microphones visible, cozy desk or daily-life setting, polished but simple, not photorealistic, not live action"
     ),
 }
 
 NEGATIVE_VISUAL_STYLE = (
     "No photorealistic humans, no live-action look, no real-photo style, no realistic human skin texture, "
-    "no ultra-realistic portrait, no boring flat design, no cheap look, no clutter, no watermark."
+    "no ultra-realistic portrait, no dark cinematic look, no generic corporate avatars, no cheap look, "
+    "no clutter, no watermark."
 )
 
 
@@ -54,11 +55,12 @@ def build_podcast_prompt_image(
     return (
         "Create a 16:9 main image for a YouTube English conversation podcast. "
         + character_anchor_text(anchor)
-        + " Show the two strong recognizable animated 3D cartoon characters in a cozy daily-life podcast environment "
-        "with visible microphones, warm table lighting, clean background details, and a polished premium composition. "
-        "Faces should be distinctive and memorable, with strong but not exaggerated expressions. "
+        + " Use a bright illustrated layout like a polished English learning podcast thumbnail: cream or soft pastel "
+        "background, friendly classroom/podcast mood, simple desk, visible microphones, coffee or notebook details, "
+        "and clear daily-life visual cues. The blond guest and red-haired host must be the visual focus. "
+        "Faces should be distinctive, warm, and memorable, with strong but not exaggerated expressions. "
         "The image should feel readable, attractive, and not empty, while staying clean and uncluttered. "
-        f"If text is useful, add only light supporting text related to the episode: \"{hook}\". "
+        f"Add only small/light supporting text if useful, not dominant: \"{hook}\". "
         + NEGATIVE_VISUAL_STYLE
     )
 
@@ -75,12 +77,15 @@ def build_podcast_prompt_thumbnail(
         "Create a 16:9 clickable YouTube thumbnail for an English conversation podcast. "
         + character_anchor_text(anchor)
         + " Use the same host and guest as the main image, with the same face, skin tone, hair color, hair style, "
-        "and overall identity. Make the facial expressions stronger and more emotional: the host looks encouraging "
+        "and overall identity: one red-haired female host and one blond male guest, absolutely no brown-haired or "
+        "black-haired avatars. Make the facial expressions stronger and more emotional: the host looks encouraging "
         "and confident, the guest looks slightly stuck but relieved to learn useful daily English. "
-        "Use high contrast, a clean background, visible microphones, premium 3D cartoon rendering, and a strong "
-        "YouTube composition with bigger emotional impact. "
+        "Use the reference style of successful English learning thumbnails: big clean title area, warm cream or "
+        "green/blue background blocks, friendly cartoon characters, visible microphones, high contrast, simple props, "
+        "and a strong readable YouTube composition with bigger emotional impact. "
         f"Add large readable hook text directly connected to the episode topic: \"{hook}\". "
-        "The hook text must be the main thumbnail text, short, strong, and not generic. "
+        "The hook text must be the main thumbnail text, short, strong, and not generic. Use bold dark blue or white "
+        "letters with clean outline/shadow so it is readable on mobile. "
         + NEGATIVE_VISUAL_STYLE
     )
 
