@@ -22,8 +22,10 @@ visual:
     - warm gold/yellow
     - dark navy/blue accent
   required_elements:
-    - female learning host with headphones
-    - waveform at the bottom
+    - blonde female learning host with large headphones
+    - closed eyes
+    - calm premium portrait composition
     - bold readable text
     - high contrast
+    - clean bottom safe area for animated waveform and subtitles added later by the video renderer
 saloo_link: https://apps.apple.com/app/saloo-english/id6770722987

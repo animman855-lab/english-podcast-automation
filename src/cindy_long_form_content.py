@@ -201,16 +201,18 @@ def build_cindy_script() -> str:
 
 def build_visual_prompts() -> dict[str, str]:
     shared = (
-        "Create a 16:9 premium 2D illustration for an English shadowing YouTube learning video. "
-        "Show Cindy as a female learning host wearing modern headphones, calm confident expression, "
-        "clear English speaking practice vibe, orange sunset and warm gold/yellow background, dark navy/blue accents, "
-        "clean premium composition, high contrast, waveform at the bottom, bold readable thumbnail text. "
-        "Text on image: STOP FREEZING / SPEAK ENGLISH. "
-        "Style inspired by successful English shadowing and listening practice thumbnails, but original. "
-        "Not 3D cartoon, not photorealistic, no live-action, no realistic skin texture, no watermark, no tiny text, no logo. "
-        "The same image must work as both YouTube/Facebook thumbnail and fixed main image inside the video."
+        "Create one 16:9 premium 2D illustration for an English shadowing YouTube learning video. "
+        "This single visual must work as both the YouTube/Facebook thumbnail and the fixed main image inside the video. "
+        "Show Cindy as a blonde female English learning host in a dominant portrait composition, wearing large modern headphones. "
+        "Cindy has closed eyes, a calm confident face, elegant clean features, a serene focused expression, and a premium modern look. "
+        "Use a warm orange sunset, golden yellow, and warm amber background with dark navy, deep brown, or dark blue accents for contrast. "
+        "The style should feel close to successful English listening and shadowing video thumbnails: strong portrait, warm colors, clean premium learning look, very visual and clickable. "
+        "Add a bold readable headline with large high-contrast text: STOP FREEZING / SPEAK ENGLISH. "
+        "Keep the composition strong but not crowded, with clean negative space and a clear bottom safe area reserved for animated waveform and subtitles that will be added later by the video renderer. "
+        "Do not draw, illustrate, render, or include any waveform, audio bars, soundwave, equalizer, subtitles, captions, or UI elements inside the image. "
+        "No 3D cartoon, no photorealistic humans, no live-action look, no realistic skin texture, no watermark, no tiny text, no logo."
     )
     return {
         "Prompt Image": shared,
-        "Prompt Thumbnail": shared + " Make the text extra large and instantly readable on mobile.",
+        "Prompt Thumbnail": shared,
     }
