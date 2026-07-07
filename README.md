@@ -190,6 +190,57 @@ Waveform style:
 - stable podcast-style visual layer
 - does not cover the subtitles
 
+## Cindy Long-Form Shadowing
+
+Cindy long-form is a separate Airtable workflow from TheFluentBuild podcast.
+
+- Airtable table: `Cindy Long Form`
+- Voice: Kokoro `bf_emma`
+- Format: Cindy alone, shadowing / listening / speaking practice
+- Future platforms: YouTube, Facebook, TikTok
+- Future video formats: `16:9` for YouTube/Facebook and `9:16` for TikTok
+- Visual style: premium 2D illustration, orange/gold with dark navy accents
+- The same visual is used as thumbnail and fixed video image
+
+Create or update the first Cindy draft row:
+
+```powershell
+python src/create_first_cindy_long_form.py
+```
+
+This script writes to Airtable only if the `Cindy Long Form` table already exists.
+It does not generate audio, video, images, or publish anything.
+
+Required Airtable fields for `Cindy Long Form`:
+
+- `Title`
+- `Date Publication`
+- `Slot`
+- `Platforms`
+- `Status`
+- `Script / Transcript`
+- `Prompt Image`
+- `Prompt Thumbnail`
+- `Single Visual Prompt`
+- `Image Link`
+- `Thumbnail Link`
+- `Video Link`
+- `Video Format`
+- `Voice`
+- `Duration Target`
+- `Content Type`
+- `Description`
+
+Recommended `Status` values:
+
+- `Draft`
+- `Waiting for Image`
+- `A publier`
+- `En cours`
+- `Publie`
+
+Do not set `Status = A publier` until `Image Link` and `Thumbnail Link` are filled.
+
 ## Notes
 
 - No API keys are required.

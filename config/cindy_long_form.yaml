@@ -1,0 +1,30 @@
+table_name: Cindy Long Form
+content_type: Cindy Long-Form Shadowing
+voice: bf_emma
+speaker_count: 1
+default_status_when_assets_missing: Waiting for Image
+duration_target: 10-15 min
+platforms:
+  - YouTube
+  - Facebook
+  - TikTok
+video_formats:
+  - "16:9"
+  - "9:16"
+visual:
+  single_visual_for_thumbnail_and_video: true
+  style: premium 2D illustration
+  forbidden:
+    - 3D cartoon
+    - photorealistic
+    - live-action
+  palette:
+    - orange sunset
+    - warm gold/yellow
+    - dark navy/blue accent
+  required_elements:
+    - female learning host with headphones
+    - waveform at the bottom
+    - bold readable text
+    - high contrast
+saloo_link: https://apps.apple.com/app/saloo-english/id6770722987

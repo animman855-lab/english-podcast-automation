@@ -21,12 +21,12 @@ class AirtableRequestError(RuntimeError):
     pass
 
 
-def load_airtable_env() -> dict[str, str]:
+def load_airtable_env(table_name_env: str = "AIRTABLE_TABLE_NAME", default_table_name: str = "English Podcast Publishing Clean") -> dict[str, str]:
     load_dotenv(ENV_PATH)
     env_values = {
         "AIRTABLE_API_KEY": os.getenv("AIRTABLE_API_KEY", "").strip(),
         "AIRTABLE_BASE_ID": os.getenv("AIRTABLE_BASE_ID", "").strip(),
-        "AIRTABLE_TABLE_NAME": os.getenv("AIRTABLE_TABLE_NAME", "English Podcast Publishing Clean").strip(),
+        "AIRTABLE_TABLE_NAME": os.getenv(table_name_env, default_table_name).strip(),
     }
     missing = [name for name, value in env_values.items() if not value]
     if missing:
@@ -76,11 +76,11 @@ def normalize_slot(value: object) -> str | None:
 
 
 class AirtableClient:
-    def __init__(self) -> None:
-        config = load_airtable_env()
+    def __init__(self, table_name: str | None = None, table_name_env: str = "AIRTABLE_TABLE_NAME") -> None:
+        config = load_airtable_env(table_name_env=table_name_env)
         self.api_key = config["api_key"]
         self.base_id = config["base_id"]
-        self.table_name = config["table_name"]
+        self.table_name = table_name or config["table_name"]
         self.base_url = f"https://api.airtable.com/v0/{quote(self.base_id)}/{quote(self.table_name, safe='')}"
 
     def _request(self, method: str, url: str, payload: dict | None = None) -> dict:
@@ -102,6 +102,13 @@ class AirtableClient:
 
     def find_record_by_title(self, title: str) -> dict | None:
         formula = f"{{Titre}} = {airtable_formula_string(title)}"
+        url = f"{self.base_url}?maxRecords=1&filterByFormula={quote(formula, safe='')}"
+        data = self._request("GET", url)
+        records = data.get("records", [])
+        return records[0] if records else None
+
+    def find_record_by_field(self, field_name: str, value: str) -> dict | None:
+        formula = f"{{{field_name}}} = {airtable_formula_string(value)}"
         url = f"{self.base_url}?maxRecords=1&filterByFormula={quote(formula, safe='')}"
         data = self._request("GET", url)
         records = data.get("records", [])
