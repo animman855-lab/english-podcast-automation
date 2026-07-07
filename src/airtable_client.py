@@ -114,6 +114,11 @@ class AirtableClient:
         records = data.get("records", [])
         return records[0] if records else None
 
+    def find_record_by_formula(self, formula: str, max_records: int = 1) -> list[dict]:
+        url = f"{self.base_url}?maxRecords={max_records}&filterByFormula={quote(formula, safe='')}"
+        data = self._request("GET", url)
+        return data.get("records", [])
+
     def find_ready_record(self) -> dict | None:
         formula = (
             "AND("

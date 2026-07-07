@@ -213,5 +213,4 @@ def build_visual_prompts() -> dict[str, str]:
     return {
         "Prompt Image": shared,
         "Prompt Thumbnail": shared + " Make the text extra large and instantly readable on mobile.",
-        "Single Visual Prompt": shared,
     }

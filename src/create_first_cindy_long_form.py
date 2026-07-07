@@ -1,11 +1,11 @@
-from datetime import date, timedelta
+from datetime import datetime
 from pathlib import Path
-import sys
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
 from airtable_client import AirtableClient, AirtableRequestError
-from cindy_description_builder import build_cindy_description
+from airtable_client import airtable_formula_string
 from cindy_long_form_content import TITLE, build_cindy_script, build_visual_prompts
 
 
@@ -13,23 +13,17 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = PROJECT_ROOT / "config" / "cindy_long_form.yaml"
 
 REQUIRED_FIELDS = [
-    "Title",
+    "Titre",
     "Date Publication",
     "Slot",
-    "Platforms",
-    "Status",
-    "Script / Transcript",
+    "Video Type",
+    "Statut",
+    "Script",
     "Prompt Image",
+    "Lien Image",
     "Prompt Thumbnail",
-    "Single Visual Prompt",
-    "Image Link",
-    "Thumbnail Link",
-    "Video Link",
-    "Video Format",
-    "Voice",
-    "Duration Target",
-    "Content Type",
-    "Description",
+    "Lien Thumbnail",
+    "Lien Video",
 ]
 
 
@@ -49,33 +43,28 @@ def validate_config(config: dict) -> None:
 
 
 def first_publication_date() -> str:
-    return (date.today() + timedelta(days=1)).isoformat()
+    try:
+        return datetime.now(ZoneInfo("America/Toronto")).date().isoformat()
+    except ZoneInfoNotFoundError:
+        return datetime.now().date().isoformat()
 
 
 def build_record_fields(config: dict) -> dict:
     script = build_cindy_script()
     prompts = build_visual_prompts()
-    description = build_cindy_description(TITLE)
-    status = config["default_status_when_assets_missing"]
 
     return {
-        "Title": TITLE,
+        "Titre": TITLE,
         "Date Publication": first_publication_date(),
         "Slot": "10",
-        "Platforms": ", ".join(config["platforms"]),
-        "Status": status,
-        "Script / Transcript": script,
+        "Video Type": config["video_type"],
+        "Statut": config["default_status"],
+        "Script": script,
         "Prompt Image": prompts["Prompt Image"],
+        "Lien Image": "",
         "Prompt Thumbnail": prompts["Prompt Thumbnail"],
-        "Single Visual Prompt": prompts["Single Visual Prompt"],
-        "Image Link": "",
-        "Thumbnail Link": "",
-        "Video Link": "",
-        "Video Format": ", ".join(config["video_formats"]),
-        "Voice": config["voice"],
-        "Duration Target": config["duration_target"],
-        "Content Type": config["content_type"],
-        "Description": description,
+        "Lien Thumbnail": "",
+        "Lien Video": "",
     }
 
 
@@ -84,9 +73,37 @@ def print_manual_table_instructions() -> None:
     print("Create it manually with these fields:")
     for field in REQUIRED_FIELDS:
         print(f"- {field}")
-    print("Recommended Status values: Draft, Waiting for Image, A publier, En cours, Publie")
-    print("Recommended Platforms value for first row: YouTube, Facebook, TikTok")
-    print("Do not set Status=A publier until Image Link and Thumbnail Link are filled.")
+    print("Recommended Statut values: A publier, En cours, Publie")
+    print("Future Cindy publishing must refuse rows where Lien Image or Lien Thumbnail is empty.")
+
+
+def find_existing_cindy_row(client: AirtableClient, fields: dict) -> dict | None:
+    formula = f"{{Titre}} = {airtable_formula_string(fields['Titre'])}"
+    records = client.find_record_by_formula(formula, max_records=10)
+    for record in records:
+        record_fields = record.get("fields", {})
+        if (
+            record_fields.get("Date Publication") == fields["Date Publication"]
+            and str(record_fields.get("Slot", "")).strip() == fields["Slot"]
+        ):
+            return record
+    return None
+
+
+def cindy_row_is_publishable(fields: dict, now_date: str | None = None) -> bool:
+    publication_date = fields.get("Date Publication", "")
+    due_date = now_date or first_publication_date()
+    return all(
+        [
+            fields.get("Statut") == "A publier",
+            publication_date <= due_date,
+            str(fields.get("Slot", "")).strip() == "10",
+            bool(fields.get("Script")),
+            bool(fields.get("Lien Image")),
+            bool(fields.get("Lien Thumbnail")),
+            not fields.get("Lien Video"),
+        ]
+    )
 
 
 def main() -> int:
@@ -96,7 +113,7 @@ def main() -> int:
     client = AirtableClient(table_name=config["table_name"])
 
     try:
-        existing = client.find_record_by_field("Title", TITLE)
+        existing = find_existing_cindy_row(client, fields)
     except AirtableRequestError as exc:
         if "404" in str(exc) or "NOT_FOUND" in str(exc) or "TABLE_NOT_FOUND" in str(exc):
             print_manual_table_instructions()
@@ -105,7 +122,7 @@ def main() -> int:
 
     if existing:
         existing_fields = existing.get("fields", {})
-        if existing_fields.get("Status") == "Publie" or existing_fields.get("Video Link"):
+        if existing_fields.get("Statut") == "Publie" or existing_fields.get("Lien Video"):
             print(f"Existing published Cindy row left unchanged: {existing['id']}")
             return 0
         try:
@@ -124,16 +141,16 @@ def main() -> int:
             return 0
         print(f"Created Cindy row: {created['id']}")
 
-    print(f"Title: {fields['Title']}")
-    print(f"Status: {fields['Status']}")
-    print(f"Voice: {fields['Voice']}")
-    print(f"Platforms: {fields['Platforms']}")
-    print(f"Video Format: {fields['Video Format']}")
-    print(f"Script words: {len(fields['Script / Transcript'].split())}")
-    print("Image Link empty: yes")
-    print("Thumbnail Link empty: yes")
-    print("Video Link empty: yes")
-    print("Saloo link at top of description: yes")
+    print(f"Titre: {fields['Titre']}")
+    print(f"Statut: {fields['Statut']}")
+    print(f"Date Publication: {fields['Date Publication']}")
+    print(f"Slot: {fields['Slot']}")
+    print(f"Video Type: {fields['Video Type']}")
+    print(f"Script words: {len(fields['Script'].split())}")
+    print("Lien Image empty: yes")
+    print("Lien Thumbnail empty: yes")
+    print("Lien Video empty: yes")
+    print(f"Future publishable now: {cindy_row_is_publishable(fields)}")
     return 0
 
 

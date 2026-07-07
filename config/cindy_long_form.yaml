@@ -1,9 +1,8 @@
 table_name: Cindy Long Form
-content_type: Cindy Long-Form Shadowing
+video_type: Cindy Shadowing
 voice: bf_emma
 speaker_count: 1
-default_status_when_assets_missing: Waiting for Image
-duration_target: 10-15 min
+default_status: A publier
 platforms:
   - YouTube
   - Facebook

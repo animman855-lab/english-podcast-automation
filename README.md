@@ -213,33 +213,25 @@ It does not generate audio, video, images, or publish anything.
 
 Required Airtable fields for `Cindy Long Form`:
 
-- `Title`
+- `Titre`
 - `Date Publication`
 - `Slot`
-- `Platforms`
-- `Status`
-- `Script / Transcript`
+- `Video Type`
+- `Statut`
+- `Script`
 - `Prompt Image`
+- `Lien Image`
 - `Prompt Thumbnail`
-- `Single Visual Prompt`
-- `Image Link`
-- `Thumbnail Link`
-- `Video Link`
-- `Video Format`
-- `Voice`
-- `Duration Target`
-- `Content Type`
-- `Description`
+- `Lien Thumbnail`
+- `Lien Video`
 
-Recommended `Status` values:
+Recommended `Statut` values:
 
-- `Draft`
-- `Waiting for Image`
 - `A publier`
 - `En cours`
 - `Publie`
 
-Do not set `Status = A publier` until `Image Link` and `Thumbnail Link` are filled.
+Future Cindy publication logic must refuse any row where `Lien Image` or `Lien Thumbnail` is empty, even if `Statut = A publier`.
 
 ## Notes
 
