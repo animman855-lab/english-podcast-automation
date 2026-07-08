@@ -80,6 +80,8 @@ def build_uploadpost_package(
     description: str,
     publish_datetime: str | None,
     output_path: str | Path,
+    user: str = "thefluentbuild",
+    platforms: list[str] | None = None,
 ) -> dict:
     validate_thumbnail_url(thumbnail_url)
     original_thumbnail = Path(thumbnail_path).resolve()
@@ -92,8 +94,8 @@ def build_uploadpost_package(
             thumbnail_upload_mode = "file"
 
     package = {
-        "platforms": ["youtube", "facebook"],
-        "user": "thefluentbuild",
+        "platforms": platforms or ["youtube", "facebook"],
+        "user": user,
         "video_path": str(Path(video_path).resolve()),
         "thumbnail_path": str(optimized_thumbnail or original_thumbnail),
         "thumbnail_original_path": str(original_thumbnail),
@@ -131,6 +133,9 @@ def build_uploadpost_data(package: dict) -> list[tuple[str, str]]:
     ]
     for platform in package.get("platforms", ["youtube", "facebook"]):
         data.append(("platform[]", platform))
+        if platform == "tiktok":
+            data.append(("tiktok_title", package["title"][:100]))
+            data.append(("tiktok_description", package["description"]))
     return data
 
 
@@ -363,6 +368,16 @@ def extract_youtube_url(response: dict) -> str:
     return ""
 
 
+def extract_platform_urls(response: dict) -> dict[str, str]:
+    urls = {}
+    for result in platform_results(response):
+        platform = result.get("platform", "")
+        url = result.get("url") or result.get("link") or result.get("post_url") or ""
+        if platform and url:
+            urls[platform] = url
+    return urls
+
+
 def submit_or_dry_run(package: dict, dry_run: bool) -> dict:
     if dry_run:
         print("DRY_RUN=true. Nothing will be sent to Upload-Post.")
@@ -388,6 +403,7 @@ def submit_or_dry_run(package: dict, dry_run: bool) -> dict:
         "published": bool(summary["platform_successes"]) and not still_processing,
         "upload_accepted": True,
         "youtube_url": youtube_url,
+        "platform_urls": extract_platform_urls(response),
         "dry_run": False,
         "background_accepted": background_accepted,
         "still_processing": still_processing,
