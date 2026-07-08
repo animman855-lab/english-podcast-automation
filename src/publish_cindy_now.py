@@ -51,7 +51,19 @@ def workflow_config() -> dict:
         "timezone": os.getenv("CINDY_TIMEZONE", "America/Toronto").strip() or "America/Toronto",
         "voice": os.getenv("CINDY_VOICE", CINDY_VOICE).strip() or CINDY_VOICE,
         "table_name": os.getenv("AIRTABLE_TABLE_NAME_CINDY", CINDY_TABLE).strip() or CINDY_TABLE,
+        "valid_window_hours": float(os.getenv("CINDY_VALID_WINDOW_HOURS", "3")),
+        "force_publish_now": env_bool("FORCE_PUBLISH_NOW", default=False),
     }
+
+
+def is_slot_window_open(now: datetime, slot: str, valid_window_hours: float) -> bool:
+    normalized_slot = normalize_slot(slot)
+    if not normalized_slot:
+        raise RuntimeError(f"Invalid CINDY_SLOT value: {slot}")
+    hour, minute = [int(part) for part in normalized_slot.split(":", 1)]
+    slot_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    elapsed_seconds = (now - slot_time).total_seconds()
+    return 0 <= elapsed_seconds <= valid_window_hours * 3600
 
 
 def record_date_is_due(fields: dict, now: datetime) -> bool:
@@ -147,6 +159,23 @@ def main() -> int:
         expected_slot = normalize_slot(config["slot"])
         if not expected_slot:
             raise RuntimeError(f"Invalid CINDY_SLOT value: {config['slot']}")
+
+        if not config["force_publish_now"] and not is_slot_window_open(
+            now,
+            config["slot"],
+            config["valid_window_hours"],
+        ):
+            print("No eligible Cindy row found")
+            print(
+                f"Current {config['timezone']} time is {now.strftime('%Y-%m-%d %H:%M:%S')}; "
+                f"valid window is {config['slot']} plus {config['valid_window_hours']:.1f} hours."
+            )
+            print("Cindy workflow is outside the allowed publishing window. Airtable was not modified.")
+            print(f"DRY_RUN={str(dry_run).lower()}. Nothing was published.")
+            return 0
+
+        if config["force_publish_now"]:
+            print("FORCE_PUBLISH_NOW=true. Cindy slot window check bypassed for this manual run.")
 
         client = AirtableClient(table_name=config["table_name"])
         record, rejection_reasons = get_ready_cindy_record(client, expected_slot, now)

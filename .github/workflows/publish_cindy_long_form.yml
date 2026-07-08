@@ -4,6 +4,12 @@ on:
   repository_dispatch:
     types: [publish_cindy_10am]
   workflow_dispatch:
+    inputs:
+      force_publish_now:
+        description: "Bypass Cindy 10:00-13:00 America/Toronto window for this manual run only"
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   publish:
@@ -16,8 +22,10 @@ jobs:
       AIRTABLE_TABLE_NAME_CINDY: Cindy Long Form
       UPLOAD_POST_API_KEY: ${{ secrets.UPLOAD_POST_API_KEY }}
       FORCE_DRY_RUN: "false"
+      FORCE_PUBLISH_NOW: ${{ github.event_name == 'workflow_dispatch' && inputs.force_publish_now == true && 'true' || 'false' }}
       CINDY_SLOT: "10"
       CINDY_TIMEZONE: "America/Toronto"
+      CINDY_VALID_WINDOW_HOURS: "3"
       CINDY_VOICE: "bf_emma"
 
     steps:
