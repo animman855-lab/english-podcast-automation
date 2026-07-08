@@ -1,20 +1,21 @@
-from collections import Counter
 from datetime import datetime
 from pathlib import Path
 import json
+import os
 import shutil
 import sys
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
-from airtable_client import AirtableClient, AirtableRequestError
-from audio_assembler import assemble_audio, audio_duration_seconds, pause_after_text
-from download_assets import download_episode_assets
+from airtable_client import AirtableClient, AirtableConfigError, AirtableRequestError, normalize_slot
+from cindy_audio_builder import CINDY_VOICE, generate_cindy_audio, script_lines
+from download_assets import AssetDownloadError, download_episode_assets
 from subtitle_ass import generate_ass
-from tts_kokoro import KokoroTTS
 from uploadpost_bridge import (
     UploadPostBridgeError,
     build_uploadpost_package,
+    env_bool,
     optimize_thumbnail_for_uploadpost,
     submit_or_dry_run,
 )
@@ -25,186 +26,148 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ENV_PATH = PROJECT_ROOT / ".env"
 TEMP_ROOT = PROJECT_ROOT / "temp"
 CINDY_TABLE = "Cindy Long Form"
-CINDY_VOICE = "bf_emma"
 CINDY_UPLOAD_USER = "cindy"
 CINDY_PLATFORMS = ["youtube", "facebook", "tiktok"]
 SALOO_LINK = "https://apps.apple.com/app/saloo-english/id6770722987"
+REQUIRED_FIELDS = [
+    "Titre",
+    "Date Publication",
+    "Slot",
+    "Video Type",
+    "Statut",
+    "Script",
+    "Lien Image",
+    "Lien Thumbnail",
+]
 
 
 def safe_slug(value: str) -> str:
     return "".join(character.lower() if character.isalnum() else "_" for character in value).strip("_")[:80]
 
 
-def script_lines(script: str) -> list[str]:
-    return [line.strip() for line in script.splitlines() if line.strip()]
-
-
-def chunk_lines(lines: list[str], max_characters: int = 750) -> list[list[str]]:
-    chunks: list[list[str]] = []
-    current: list[str] = []
-    current_length = 0
-
-    for line in lines:
-        next_length = current_length + len(line) + 1
-        if current and next_length > max_characters:
-            chunks.append(current)
-            current = []
-            current_length = 0
-        current.append(line)
-        current_length += len(line) + 1
-
-    if current:
-        chunks.append(current)
-    return chunks
-
-
-def line_timings_for_chunk(lines: list[str], start_time: float, duration: float) -> list[dict]:
-    weights = [max(1, len(line)) for line in lines]
-    total_weight = sum(weights)
-    cursor = start_time
-    timings: list[dict] = []
-
-    for index, line in enumerate(lines):
-        if index == len(lines) - 1:
-            end_time = start_time + duration
-        else:
-            end_time = cursor + duration * (weights[index] / total_weight)
-        timings.append(
-            {
-                "text": line,
-                "start_time": cursor,
-                "end_time": end_time,
-                "duration": end_time - cursor,
-            }
-        )
-        cursor = end_time
-
-    return timings
-
-
-def write_metadata(metadata: list[dict], path: Path) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
-    return path
-
-
-def generate_cindy_audio(script: str, output_path: Path, temp_dir: Path, metadata_path: Path) -> dict:
-    lines = script_lines(script)
-    if not lines:
-        raise RuntimeError("Cindy script is empty.")
-
-    tts = KokoroTTS(lang_code="a", sample_rate=24000)
-    temp_dir.mkdir(parents=True, exist_ok=True)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    segment_paths = []
-    segment_texts = []
-    metadata = []
-    cursor_seconds = 0.15
-    chunks = chunk_lines(lines)
-    line_index = 1
-
-    print(f"Cindy script lines: {len(lines)}")
-    print(f"Cindy TTS chunks: {len(chunks)}")
-
-    for chunk_index, chunk in enumerate(chunks, start=1):
-        text = "\n".join(chunk)
-        segment_path = temp_dir / f"{chunk_index:03d}_cindy_chunk.wav"
-        print(f"Generating Cindy TTS chunk {chunk_index}/{len(chunks)} with voice '{CINDY_VOICE}'...")
-        tts.synthesize_to_file(text, CINDY_VOICE, segment_path)
-        duration = audio_duration_seconds(segment_path)
-        start_time = cursor_seconds
-        end_time = start_time + duration
-        for timing in line_timings_for_chunk(chunk, start_time, duration):
-            metadata.append(
-                {
-                    "index": line_index,
-                    "speaker": "Cindy",
-                    "text": timing["text"],
-                    "voice": CINDY_VOICE,
-                    "audio_path": str(segment_path),
-                    "start_time": round(timing["start_time"], 3),
-                    "end_time": round(timing["end_time"], 3),
-                    "duration": round(timing["duration"], 3),
-                }
-            )
-            line_index += 1
-        segment_paths.append(segment_path)
-        segment_texts.append(text)
-        cursor_seconds = end_time
-        if chunk_index < len(chunks):
-            cursor_seconds += pause_after_text(chunk[-1], 0.75, 1.0, 0.9)
-
-    assemble_audio(
-        segment_paths=segment_paths,
-        segment_texts=segment_texts,
-        output_path=output_path,
-        default_pause_seconds=0.75,
-        question_pause_seconds=1.0,
-        long_reply_pause_seconds=0.9,
-    )
-    write_metadata(metadata, metadata_path)
-
+def workflow_config() -> dict:
     return {
-        "segments": len(lines),
-        "voice": CINDY_VOICE,
-        "duration": audio_duration_seconds(output_path),
-        "audio_path": output_path,
-        "metadata_path": metadata_path,
+        "slot": os.getenv("CINDY_SLOT", "10").strip() or "10",
+        "timezone": os.getenv("CINDY_TIMEZONE", "America/Toronto").strip() or "America/Toronto",
+        "voice": os.getenv("CINDY_VOICE", CINDY_VOICE).strip() or CINDY_VOICE,
+        "table_name": os.getenv("AIRTABLE_TABLE_NAME_CINDY", CINDY_TABLE).strip() or CINDY_TABLE,
     }
 
 
-def build_cindy_description(title: str, script: str) -> str:
-    excerpt = " ".join(script_lines(script)[:12])
-    lines = [
-        "Practice real English conversations with Saloo English:",
-        SALOO_LINK,
-        "",
-        f"In this Cindy long-form shadowing practice, we train: {title}.",
-        "",
-        "Listen first, repeat out loud, and copy the rhythm of calm natural English.",
-        "This practice is for learners who understand English but freeze when it is time to speak.",
-        "",
-        "Use Saloo English to practice real conversations, build speaking confidence, and stop blocking when you need to answer.",
-        "",
-        "Practice focus:",
-        excerpt[:500].rstrip() + ("..." if len(excerpt) > 500 else ""),
-        "",
-        "#EnglishShadowing #SpeakEnglish #EnglishListening #EnglishPractice #LearnEnglish #SpokenEnglish #EnglishSpeaking #SalooEnglish",
-    ]
-    return "\n".join(lines)
+def record_date_is_due(fields: dict, now: datetime) -> bool:
+    publication_date = fields.get("Date Publication", "")
+    if not publication_date:
+        return False
+    return publication_date <= now.date().isoformat()
 
 
-def get_ready_cindy_record(client: AirtableClient) -> dict | None:
+def explain_candidate_rejection(fields: dict, expected_slot: str, now: datetime) -> str | None:
+    raw_slot = fields.get("Slot", "")
+    normalized_slot = normalize_slot(raw_slot)
+    if not normalized_slot:
+        return (
+            f"Slot Airtable brut={raw_slot!r}; Slot Airtable normalise=invalid; "
+            f"Slot attendu normalise={expected_slot}; raison=slot vide ou impossible a parser"
+        )
+    if normalized_slot != expected_slot:
+        return (
+            f"Slot Airtable brut={raw_slot!r}; Slot Airtable normalise={normalized_slot}; "
+            f"Slot attendu normalise={expected_slot}; raison=slot different"
+        )
+    if not record_date_is_due(fields, now):
+        return (
+            f"Slot Airtable brut={raw_slot!r}; Slot Airtable normalise={normalized_slot}; "
+            f"Slot attendu normalise={expected_slot}; raison=Date Publication pas encore due"
+        )
+    return None
+
+
+def validate_record_fields(fields: dict) -> None:
+    missing = [field for field in REQUIRED_FIELDS if not fields.get(field)]
+    if missing:
+        raise RuntimeError(f"Ready Cindy record is missing required field(s): {', '.join(missing)}")
+
+
+def get_ready_cindy_record(client: AirtableClient, expected_slot: str, now: datetime) -> tuple[dict | None, list[str]]:
     formula = (
         "AND("
-        "OR({Statut} = 'A publier', {Statut} = 'En cours'),"
+        "{Statut} = 'A publier',"
         "{Script} != '',"
         "{Lien Image} != '',"
         "{Lien Thumbnail} != '',"
         "{Lien Video} = ''"
         ")"
     )
-    records = client.find_record_by_formula(formula, max_records=1)
-    return records[0] if records else None
+    candidates = client.find_record_by_formula(formula, max_records=10)
+    rejection_reasons: list[str] = []
+
+    for candidate in candidates:
+        fields = candidate.get("fields", {})
+        rejection_reason = explain_candidate_rejection(fields, expected_slot, now)
+        if rejection_reason:
+            rejection_reasons.append(rejection_reason)
+            continue
+        return candidate, rejection_reasons
+
+    return None, rejection_reasons
+
+
+def build_cindy_description(title: str, script: str) -> str:
+    excerpt = " ".join(script_lines(script)[:12])
+    return "\n".join(
+        [
+            "Practice real English conversations with Saloo English:",
+            SALOO_LINK,
+            "",
+            f"In this Cindy long-form shadowing practice, we train: {title}.",
+            "",
+            "Listen first, repeat out loud, and copy the rhythm of calm natural English.",
+            "This practice is for learners who understand English but freeze when it is time to speak.",
+            "",
+            "Use Saloo English to practice real conversations, build speaking confidence, and stop blocking when you need to answer.",
+            "",
+            "Practice focus:",
+            excerpt[:500].rstrip() + ("..." if len(excerpt) > 500 else ""),
+            "",
+            "#EnglishShadowing #SpeakEnglish #EnglishListening #EnglishPractice #LearnEnglish #SpokenEnglish #EnglishSpeaking #SalooEnglish",
+        ]
+    )
 
 
 def main() -> int:
     load_dotenv(ENV_PATH)
+    dry_run = env_bool("FORCE_DRY_RUN", default=env_bool("DRY_RUN", default=False))
     record_id = ""
     workflow_dir: Path | None = None
 
     try:
         require_ffmpeg()
-        client = AirtableClient(table_name=CINDY_TABLE)
-        record = get_ready_cindy_record(client)
+        config = workflow_config()
+        now = datetime.now(ZoneInfo(config["timezone"]))
+        expected_slot = normalize_slot(config["slot"])
+        if not expected_slot:
+            raise RuntimeError(f"Invalid CINDY_SLOT value: {config['slot']}")
+
+        client = AirtableClient(table_name=config["table_name"])
+        record, rejection_reasons = get_ready_cindy_record(client, expected_slot, now)
         if not record:
-            print("No eligible Cindy row found.")
-            print("Expected one row with Statut=A publier, Script/Lien Image/Lien Thumbnail non-empty, Lien Video empty.")
+            print("No eligible Cindy row found")
+            print(
+                "Expected: Statut=A publier, Date Publication<=now, "
+                f"Slot={config['slot']} (normalized {expected_slot}), "
+                "Script/Lien Image/Lien Thumbnail non-empty, Lien Video empty."
+            )
+            if rejection_reasons:
+                print("Rejected ready Cindy rows:")
+                for reason in rejection_reasons:
+                    print(f"- {reason}")
+            print(f"DRY_RUN={str(dry_run).lower()}. Nothing was published.")
             return 0
 
         record_id = record["id"]
         fields = record.get("fields", {})
+        validate_record_fields(fields)
+
         title = fields["Titre"]
         workflow_dir = TEMP_ROOT / f"cindy_publish_{record_id}_{safe_slug(title)}"
         assets_dir = workflow_dir / "assets"
@@ -218,7 +181,9 @@ def main() -> int:
 
         print(f"Processing Cindy record: {record_id}")
         print(f"Title: {title}")
-        print("Publishing now: ignoring normal slot window.")
+        print(f"DRY_RUN={str(dry_run).lower()}")
+        print(f"Cindy voice: {config['voice']}")
+        print("TikTok 9:16 renderer is not implemented yet; publishing the generated 16:9 video to all requested platforms.")
 
         client.update_record(record_id, {"Statut": "En cours"})
         print("Airtable Statut set to En cours.")
@@ -236,8 +201,11 @@ def main() -> int:
             thumbnail_optimized_path = None
             print(f"WARNING: Thumbnail optimization failed; falling back to thumbnail_url. Error: {exc}")
 
-        audio_result = generate_cindy_audio(fields["Script"], audio_path, audio_dir, metadata_path)
-        print(f"Audio generated: {audio_result['audio_path']} ({audio_result['duration']:.1f}s)")
+        audio_result = generate_cindy_audio(fields["Script"], audio_path, audio_dir, metadata_path, voice=config["voice"])
+        print(
+            f"Audio generated: {audio_result['audio_path']} "
+            f"({audio_result['duration']:.1f}s, generation {audio_result['generation_seconds']:.1f}s)"
+        )
 
         generate_ass(metadata_path, subtitles_path)
         print(f"Subtitles generated: {subtitles_path}")
@@ -245,7 +213,6 @@ def main() -> int:
         render_video(assets["image_path"], audio_path, subtitles_path, video_path)
         video_duration = probe_duration(video_path)
         print(f"Video generated: {video_path} ({video_duration:.1f}s)")
-        print("TikTok 9:16 renderer is not implemented yet; publishing the generated 16:9 video to all requested platforms.")
 
         package = build_uploadpost_package(
             video_path=video_path,
@@ -261,12 +228,17 @@ def main() -> int:
         )
         print(f"Upload-Post package prepared: {package_path}")
 
-        upload_result = submit_or_dry_run(package, dry_run=False)
+        upload_result = submit_or_dry_run(package, dry_run=dry_run)
         platform_urls = upload_result.get("platform_urls", {})
         youtube_url = upload_result.get("youtube_url", "")
         link_to_store = youtube_url or next(iter(platform_urls.values()), "")
+        accepted = (
+            upload_result.get("published")
+            or upload_result.get("background_accepted")
+            or (upload_result.get("upload_accepted") and upload_result.get("still_processing"))
+        )
 
-        if upload_result.get("published") or upload_result.get("background_accepted"):
+        if accepted and not dry_run:
             update_fields = {"Statut": "Publie"}
             if link_to_store:
                 update_fields["Lien Video"] = link_to_store
@@ -274,6 +246,10 @@ def main() -> int:
             print("Airtable Statut set to Publie.")
             if link_to_store:
                 print(f"Airtable Lien Video set to: {link_to_store}")
+            else:
+                print("Lien Video left empty because Upload-Post did not return a URL yet.")
+        elif dry_run:
+            print("Dry-run complete. Airtable was not marked Publie and no Lien Video was written.")
         else:
             raise RuntimeError("Upload-Post did not confirm publication acceptance.")
 
@@ -291,13 +267,14 @@ def main() -> int:
                     "request_id": upload_result.get("request_id", ""),
                     "published": upload_result.get("published"),
                     "background_accepted": upload_result.get("background_accepted"),
+                    "still_processing": upload_result.get("still_processing"),
                 },
                 indent=2,
             )
         )
         return 0
 
-    except (AirtableRequestError, UploadPostBridgeError, Exception) as exc:
+    except (AirtableConfigError, AirtableRequestError, AssetDownloadError, UploadPostBridgeError, Exception) as exc:
         print()
         print("Cindy publish failed.")
         print(f"Error: {exc}")
