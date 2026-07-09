@@ -15,6 +15,7 @@ from main import generate_audio_from_script
 from subtitle_ass import generate_ass
 from uploadpost_bridge import (
     UploadPostBridgeError,
+    best_platform_url,
     build_uploadpost_package,
     env_bool,
     optimize_thumbnail_for_uploadpost,
@@ -230,17 +231,25 @@ def main() -> int:
 
         upload_result = submit_or_dry_run(package, dry_run=dry_run)
 
-        if upload_result.get("published"):
+        accepted = (
+            upload_result.get("published")
+            or upload_result.get("background_accepted")
+            or (upload_result.get("upload_accepted") and upload_result.get("still_processing"))
+        )
+        if accepted:
             youtube_url = upload_result.get("youtube_url", "")
+            platform_urls = upload_result.get("platform_urls", {})
+            link_to_store = best_platform_url(platform_urls, youtube_url)
+            if upload_result.get("platform_failures"):
+                print(f"WARNING: Some Upload-Post platform(s) failed: {upload_result.get('platform_failures')}")
             if upload_result.get("thumbnail_failed"):
                 request_id = upload_result.get("request_id", "")
                 print("WARNING: Video was published, but Upload-Post reported a thumbnail failure.")
                 print(f"Upload-Post request_id: {request_id}")
                 print(f"Thumbnail error(s): {upload_result.get('thumbnail_errors', [])}")
-                print("Airtable left as En cours so the issue can be reviewed without creating a duplicate.")
-            elif youtube_url:
-                client.update_record(record_id, {"Lien Video": youtube_url, "Statut": "Publie"})
-                print(f"Airtable updated with YouTube URL: {youtube_url}")
+            if link_to_store:
+                client.update_record(record_id, {"Lien Video": link_to_store, "Statut": "Publie"})
+                print(f"Airtable updated with best available video URL: {link_to_store}")
             elif upload_result.get("background_accepted"):
                 request_id = upload_result.get("request_id", "")
                 client.update_record(record_id, {"Statut": "Publie"})
@@ -248,7 +257,8 @@ def main() -> int:
                 print(f"Upload-Post request_id: {request_id}")
                 print("Airtable Statut set to Publie. Lien Video left empty because no URL was returned yet.")
             else:
-                raise RuntimeError("Upload-Post published but did not return a YouTube URL.")
+                client.update_record(record_id, {"Statut": "Publie"})
+                print("Airtable Statut set to Publie. Lien Video left empty because no URL was returned yet.")
             if workflow_dir:
                 shutil.rmtree(workflow_dir, ignore_errors=True)
                 print("Temporary workflow files deleted after publication.")

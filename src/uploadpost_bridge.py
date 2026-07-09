@@ -19,6 +19,7 @@ class UploadPostBridgeError(RuntimeError):
 THUMBNAIL_MAX_BYTES = 1_800_000
 UPLOAD_STATUS_POLL_INTERVAL_SECONDS = 30
 UPLOAD_STATUS_TIMEOUT_SECONDS = 600
+DEFAULT_UPLOADPOST_PLATFORMS = ["youtube", "facebook", "tiktok"]
 
 
 def env_bool(name: str, default: bool = True) -> bool:
@@ -94,7 +95,7 @@ def build_uploadpost_package(
             thumbnail_upload_mode = "file"
 
     package = {
-        "platforms": platforms or ["youtube", "facebook"],
+        "platforms": platforms or DEFAULT_UPLOADPOST_PLATFORMS,
         "user": user,
         "video_path": str(Path(video_path).resolve()),
         "thumbnail_path": str(optimized_thumbnail or original_thumbnail),
@@ -131,7 +132,7 @@ def build_uploadpost_data(package: dict) -> list[tuple[str, str]]:
         ("thumbnail_url", thumbnail_url),
         ("facebook_media_type", "VIDEO"),
     ]
-    for platform in package.get("platforms", ["youtube", "facebook"]):
+    for platform in package.get("platforms", DEFAULT_UPLOADPOST_PLATFORMS):
         data.append(("platform[]", platform))
         if platform == "tiktok":
             data.append(("tiktok_title", package["title"][:100]))
@@ -272,7 +273,7 @@ def upload_response_summary(response: dict, expected_platforms: list[str]) -> di
         platform for platform in expected_platforms if platform not in successes and platform not in failed_platforms
     ]
     if results and missing_platforms:
-        failures.append(f"Missing final result for platform(s): {', '.join(missing_platforms)}")
+        print(f"WARNING: Upload-Post returned no final result for platform(s): {', '.join(missing_platforms)}")
     return {
         "platform_successes": successes,
         "platform_failures": failures,
@@ -325,7 +326,7 @@ def upload_to_upload_post(package: dict) -> dict:
     except json.JSONDecodeError as exc:
         raise UploadPostBridgeError("Upload-Post returned invalid JSON.") from exc
 
-    if result.get("success") is False or result.get("status") == "failed":
+    if (result.get("success") is False or result.get("status") == "failed") and not platform_results(result):
         raise UploadPostBridgeError(f"Upload-Post reported failure: {result}")
 
     if is_background_accepted(result):
@@ -345,7 +346,7 @@ def upload_to_upload_post(package: dict) -> dict:
     for platform in package.get("platforms", []):
         platform_result = platform_result_for(result, platform)
         if isinstance(platform_result, dict) and platform_result.get("success") is False:
-            raise UploadPostBridgeError(f"Upload-Post {platform} failed: {platform_result}")
+            print(f"WARNING: Upload-Post {platform} failed: {platform_result}")
 
     warn_thumbnail_result(result)
     return result
@@ -378,6 +379,15 @@ def extract_platform_urls(response: dict) -> dict[str, str]:
     return urls
 
 
+def best_platform_url(platform_urls: dict[str, str], youtube_url: str = "") -> str:
+    if youtube_url:
+        return youtube_url
+    for platform in ("youtube", "facebook", "tiktok"):
+        if platform_urls.get(platform):
+            return platform_urls[platform]
+    return next(iter(platform_urls.values()), "")
+
+
 def submit_or_dry_run(package: dict, dry_run: bool) -> dict:
     if dry_run:
         print("DRY_RUN=true. Nothing will be sent to Upload-Post.")
@@ -387,7 +397,15 @@ def submit_or_dry_run(package: dict, dry_run: bool) -> dict:
         print(json.dumps(build_uploadpost_data(package), indent=2))
         print("Upload-Post multipart files that would be sent:")
         print(json.dumps({name: [spec[0], str(spec[1]), spec[2]] for name, spec in build_uploadpost_file_specs(package).items()}, indent=2))
-        return {"published": False, "youtube_url": "", "dry_run": True}
+        return {
+            "published": False,
+            "upload_accepted": False,
+            "youtube_url": "",
+            "platform_urls": {},
+            "platform_successes": [],
+            "platform_failures": [],
+            "dry_run": True,
+        }
 
     response = upload_to_upload_post(package)
     youtube_url = extract_youtube_url(response)
@@ -396,8 +414,12 @@ def submit_or_dry_run(package: dict, dry_run: bool) -> dict:
     still_processing = bool(payload.get("background_timeout"))
     summary = upload_response_summary(response, package.get("platforms", []))
 
-    if summary["platform_failures"]:
-        raise UploadPostBridgeError(f"Upload-Post platform failure(s): {summary['platform_failures']}")
+    for failure in summary["platform_failures"]:
+        print(f"WARNING: Upload-Post platform failure: {failure}")
+
+    accepted = bool(summary["platform_successes"]) or background_accepted or still_processing
+    if not accepted:
+        raise UploadPostBridgeError(f"Upload-Post platform failure(s): {summary['platform_failures'] or ['No platform accepted publication.']}")
 
     return {
         "published": bool(summary["platform_successes"]) and not still_processing,
@@ -412,5 +434,6 @@ def submit_or_dry_run(package: dict, dry_run: bool) -> dict:
         "thumbnail_failed": summary["thumbnail_failed"],
         "thumbnail_errors": summary["thumbnail_errors"],
         "platform_successes": summary["platform_successes"],
+        "platform_failures": summary["platform_failures"],
         "response": response,
     }

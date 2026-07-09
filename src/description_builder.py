@@ -13,6 +13,12 @@ BASE_HASHTAGS = [
     "#EnglishVocabulary",
 ]
 
+SALOO_DESCRIPTION_HEADER = [
+    "Practice real English conversations with Saloo English:",
+    "https://apps.apple.com/app/saloo-english/id6770722987",
+    "",
+]
+
 TOPIC_HASHTAG_RULES = [
     (("#daily", "daily", "day", "everyday", "morning", "work", "school", "routine"), ["#NaturalEnglish", "#EverydayEnglish", "#EnglishSpeaking", "#EnglishLesson"]),
     (("speak", "speaking", "freeze", "conversation", "respond"), ["#EnglishSpeaking", "#SpeakEnglishFluently", "#ConversationPractice", "#SpokenEnglish"]),
@@ -81,6 +87,7 @@ def build_youtube_description(title: str, script: str) -> str:
     middle_hashtags, final_hashtags = build_hashtag_blocks(title, script)
 
     lines = [
+        *SALOO_DESCRIPTION_HEADER,
         f"In this English conversation podcast, we practice: {title}.",
         "",
         "This episode helps intermediate English learners understand why speaking can feel difficult even when listening feels easy.",
@@ -99,7 +106,7 @@ def build_youtube_description(title: str, script: str) -> str:
             "",
             "Practice listening, speaking, and responding naturally in real-life English conversations.",
             "",
-            "Follow Saloo English for more natural English conversation practice.",
+            "Use Saloo English to practice real conversations, answer faster, and build confidence step by step.",
         ]
     )
 
