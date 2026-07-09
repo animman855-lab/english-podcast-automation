@@ -14,6 +14,7 @@ from download_assets import AssetDownloadError, download_episode_assets
 from subtitle_ass import generate_ass
 from uploadpost_bridge import (
     UploadPostBridgeError,
+    best_platform_url,
     build_uploadpost_package,
     env_bool,
     optimize_thumbnail_for_uploadpost,
@@ -260,7 +261,7 @@ def main() -> int:
         upload_result = submit_or_dry_run(package, dry_run=dry_run)
         platform_urls = upload_result.get("platform_urls", {})
         youtube_url = upload_result.get("youtube_url", "")
-        link_to_store = youtube_url or next(iter(platform_urls.values()), "")
+        link_to_store = best_platform_url(platform_urls, youtube_url)
         accepted = (
             upload_result.get("published")
             or upload_result.get("background_accepted")
@@ -268,6 +269,8 @@ def main() -> int:
         )
 
         if accepted and not dry_run:
+            if upload_result.get("platform_failures"):
+                print(f"WARNING: Some Upload-Post platform(s) failed: {upload_result.get('platform_failures')}")
             update_fields = {"Statut": "Publie"}
             if link_to_store:
                 update_fields["Lien Video"] = link_to_store
@@ -291,6 +294,7 @@ def main() -> int:
                     "title": title,
                     "platforms": CINDY_PLATFORMS,
                     "platform_successes": upload_result.get("platform_successes", []),
+                    "platform_failures": upload_result.get("platform_failures", []),
                     "platform_urls": platform_urls,
                     "youtube_url": youtube_url,
                     "request_id": upload_result.get("request_id", ""),
